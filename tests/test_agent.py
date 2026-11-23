@@ -94,3 +94,52 @@ if __name__ == "__main__":
     test_resolved_flow()
     test_safety_flow()
     print("ALL TESTS PASSED")
+
+
+# ------------------------------------------------------------ OpenRouter path
+
+def oa_tool(i, name, args):
+    import json as _j
+    return NS(id=i, type="function", function=NS(name=name, arguments=_j.dumps(args)))
+
+
+class FakeOpenAI:
+    def __init__(self, script):
+        self.script = list(script)
+        self.calls = []
+        self.chat = NS(completions=self)
+
+    def create(self, **kw):
+        self.calls.append(kw)
+        content, tcs = self.script.pop(0)
+        return NS(choices=[NS(message=NS(content=content, tool_calls=tcs), finish_reason="tool_calls" if tcs else "stop")],
+                  usage=NS(prompt_tokens=3000, completion_tokens=250))
+
+
+def test_openrouter_flow():
+    script = [
+        (None, [oa_tool("c1", "lookup_appliance", {"serial_number": "WM7-2503-1832"}),
+                oa_tool("c2", "search_manual", {"model": "WM-7", "query": "E21"})]),
+        ("Voici les étapes…", None),
+        (None, [oa_tool("c3", "log_outcome", {"serial_number": "WM7-2503-1832", "outcome": "resolved_remotely", "summary": "ok"})]),
+        ("Parfait !", None),
+    ]
+    c = FakeOpenAI(script)
+    s = agent.new_state()
+    msgs = [agent.user_message("openrouter", "E21", ["AAAA"])]
+    assert msgs[0]["content"][0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    ev = agent.run_turn_openrouter(c, "anthropic/claude-sonnet-5.5", msgs, s, TODAY)
+    assert [e["tool"] for e in ev] == ["lookup_appliance", "search_manual"]
+    assert c.calls[0]["messages"][0]["role"] == "system" and c.calls[0]["tools"][0]["type"] == "function"
+    assert agent.assistant_texts("openrouter", msgs) == ["Voici les étapes…"]
+    msgs.append(agent.user_message("openrouter", "ça marche", []))
+    agent.run_turn_openrouter(c, "anthropic/claude-sonnet-5.5", msgs, s, TODAY)
+    assert s["visits_avoided"] == 1 and s["brand_cost_avoided_eur"] == 90
+    roles = [m["role"] for m in msgs]
+    assert roles == ["user", "assistant", "tool", "tool", "assistant", "user", "assistant", "tool", "assistant"], roles
+    print("openrouter flow OK; cost $%.4f" % s["usage"]["cost_usd"])
+
+
+if __name__ == "__main__":
+    test_openrouter_flow()
+    print("OPENROUTER TEST PASSED")

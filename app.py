@@ -54,9 +54,24 @@ def get_secret(name: str, default: str | None = None) -> str | None:
 
 
 @st.cache_resource
-def get_client(api_key: str):
+def get_client(provider: str, api_key: str):
+    if provider == "openrouter":
+        from openai import OpenAI
+        return OpenAI(base_url=agent.OPENROUTER_BASE_URL, api_key=api_key,
+                      default_headers={"X-Title": "Reparo PoC"})
     import anthropic
     return anthropic.Anthropic(api_key=api_key)
+
+
+# Provider: OpenRouter if its key is set, otherwise Anthropic directly.
+if get_secret("OPENROUTER_API_KEY"):
+    PROVIDER, API_KEY = "openrouter", get_secret("OPENROUTER_API_KEY")
+    MODELS = {"Claude Sonnet 5.5 (default)": "anthropic/claude-sonnet-5.5",
+              "Claude Haiku 5.5 (cheapest)": "anthropic/claude-haiku-5.5"}
+else:
+    PROVIDER, API_KEY = "anthropic", get_secret("ANTHROPIC_API_KEY")
+    MODELS = {"Claude Sonnet 5.5 (default)": "claude-sonnet-5-5",
+              "Claude Haiku 5.5 (cheapest)": "claude-haiku-5-5"}
 
 
 def reset():
@@ -79,8 +94,8 @@ with st.sidebar:
         status = "under warranty" if today <= end else "out of warranty"
         st.markdown(f"`{a['serial']}`  \n{a['type'].split(' (')[0]} · {status}")
     st.divider()
-    models = {"Claude Sonnet 5.5 (default)": "claude-sonnet-5-5", "Claude Haiku 5.5 (cheapest)": "claude-haiku-5-5"}
-    default_model = get_secret("REPARO_MODEL", "claude-sonnet-5-5")
+    models = MODELS
+    default_model = get_secret("REPARO_MODEL", list(MODELS.values())[0])
     labels = list(models)
     idx = list(models.values()).index(default_model) if default_model in models.values() else 0
     model_label = st.selectbox("Model", labels, index=idx)
@@ -97,11 +112,10 @@ st.markdown('<div class="sub">AI after-sales assistant · demo for Arvel (fictio
             'Describe a problem with a washing machine, a dishwasher or a fridge, or send a photo of the display.</div>',
             unsafe_allow_html=True)
 
-api_key = get_secret("ANTHROPIC_API_KEY")
-if not api_key:
-    st.error("No API key found. Add ANTHROPIC_API_KEY to the app secrets (see README).")
+if not API_KEY:
+    st.error("No API key found. Add OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) to the app secrets (see README).")
     st.stop()
-client = get_client(api_key)
+client = get_client(PROVIDER, API_KEY)
 
 left, right = st.columns([2.1, 1], gap="large")
 
@@ -125,42 +139,37 @@ def render_events(events):
         st.markdown(f'<div class="tool">→ {label}{" · " + detail if detail else ""}</div>', unsafe_allow_html=True)
 
 
-def image_block(uploaded) -> tuple[dict, bytes]:
+def to_jpeg(uploaded) -> bytes:
     from PIL import Image
     img = Image.open(uploaded)
     img = img.convert("RGB")
     img.thumbnail((1024, 1024))
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=85)
-    data = buf.getvalue()
-    return ({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
-                                          "data": base64.b64encode(data).decode()}}, data)
+    return buf.getvalue()
 
 
 def handle(text: str, files=None):
-    content = []
-    shown_image = None
-    for f in files or []:
-        block, raw = image_block(f)
-        content.append(block)
-        shown_image = raw
-    content.append({"type": "text", "text": text or "Here is a photo of my appliance."})
+    jpegs = [to_jpeg(f) for f in files or []]
+    shown_image = jpegs[-1] if jpegs else None
+    new = agent.user_message(PROVIDER, text or "Here is a photo of my appliance.",
+                             [base64.b64encode(j).decode() for j in jpegs])
     msgs = st.session_state.messages
-    if msgs and msgs[-1]["role"] == "user":  # previous turn ended on tool results
-        msgs[-1]["content"].extend(content)
+    if PROVIDER == "anthropic" and msgs and msgs[-1]["role"] == "user":  # previous turn ended on tool results
+        msgs[-1]["content"].extend(new["content"])
     else:
-        msgs.append({"role": "user", "content": content})
+        msgs.append(new)
     st.session_state.display.append({"role": "user", "text": text, "image": shown_image})
     start = len(msgs)
     try:
-        events = agent.run_turn(client, model, msgs, st.session_state.state, today)
+        if PROVIDER == "openrouter":
+            events = agent.run_turn_openrouter(client, model, msgs, st.session_state.state, today)
+        else:
+            events = agent.run_turn(client, model, msgs, st.session_state.state, today)
     except Exception as exc:
-        st.session_state.display.append({"role": "assistant", "text": f"Sorry, the assistant is unavailable right now ({type(exc).__name__}). Please try again.", "events": []})
+        st.session_state.display.append({"role": "assistant", "text": f"Sorry, the assistant is unavailable right now ({type(exc).__name__}: {str(exc)[:160]}). Please try again.", "events": []})
         return
-    texts = []
-    for m in msgs[start:]:
-        if m["role"] == "assistant":
-            texts += [c["text"] for c in m["content"] if c.get("type") == "text" and c.get("text", "").strip()]
+    texts = agent.assistant_texts(PROVIDER, msgs[start:])
     st.session_state.display.append({"role": "assistant", "text": "\n\n".join(texts) or "…", "events": events})
 
 

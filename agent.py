@@ -20,7 +20,13 @@ PRICES = {
     "claude-sonnet-5-5": (2.0, 10.0),
     "claude-haiku-5-5": (0.10, 0.50),
     "claude-opus-5-5": (4.0, 20.0),
+    # Same models through OpenRouter
+    "anthropic/claude-sonnet-5.5": (2.0, 10.0),
+    "anthropic/claude-haiku-5.5": (0.10, 0.50),
+    "anthropic/claude-opus-5.5": (4.0, 20.0),
 }
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 STOPWORDS = {
     "the", "a", "an", "and", "or", "is", "it", "my", "of", "to", "in", "on", "not",
@@ -355,6 +361,92 @@ def run_turn(client, model: str, messages: list, state: dict, today: date | None
         messages.append({"role": "user", "content": results})
     state["turn_latencies_s"].append(round(time.time() - t0, 1))
     return events
+
+
+# ------------------------------------------------- OpenRouter (OpenAI-compatible)
+
+TOOLS_OPENAI = [
+    {"type": "function",
+     "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}}
+    for t in TOOLS
+]
+
+
+def run_turn_openrouter(client, model: str, messages: list, state: dict, today: date | None = None,
+                        max_steps: int = 8, max_tokens: int = 700) -> list[dict]:
+    """Same loop as run_turn, for an OpenAI-compatible client pointed at OpenRouter.
+
+    `messages` holds OpenAI-format messages (no system message: it is added on each call).
+    """
+    today = today or date.today()
+    events = []
+    p_in, p_out = PRICES.get(model, PRICES["anthropic/claude-sonnet-5.5"])
+    t0 = time.time()
+    for _ in range(max_steps):
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=0.2,
+            messages=[{"role": "system", "content": system_prompt(today)}] + messages,
+            tools=TOOLS_OPENAI,
+        )
+        u = response.usage
+        if u is not None:
+            state["usage"]["input_tokens"] += u.prompt_tokens or 0
+            state["usage"]["output_tokens"] += u.completion_tokens or 0
+            state["usage"]["cost_usd"] += ((u.prompt_tokens or 0) * p_in + (u.completion_tokens or 0) * p_out) / 1e6
+        state["usage"]["calls"] += 1
+
+        msg = response.choices[0].message
+        tool_calls = list(msg.tool_calls or [])
+        assistant = {"role": "assistant", "content": msg.content or ""}
+        if tool_calls:
+            assistant["tool_calls"] = [
+                {"id": tc.id, "type": "function",
+                 "function": {"name": tc.function.name, "arguments": tc.function.arguments or "{}"}}
+                for tc in tool_calls
+            ]
+        messages.append(assistant)
+        if not tool_calls:
+            break
+        for tc in tool_calls:
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            out = run_tool(tc.function.name, args, state, today)
+            events.append({"tool": tc.function.name, "input": args, "output": out})
+            messages.append({"role": "tool", "tool_call_id": tc.id,
+                             "content": json.dumps(out, ensure_ascii=False)})
+    state["turn_latencies_s"].append(round(time.time() - t0, 1))
+    return events
+
+
+# ------------------------------------------------------------ provider helpers
+
+def user_message(provider: str, text: str, jpegs_b64: list[str]) -> dict:
+    """Build the customer's message in the provider's format."""
+    if provider == "openrouter":
+        parts = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b}"}} for b in jpegs_b64]
+        parts.append({"type": "text", "text": text})
+        return {"role": "user", "content": parts}
+    parts = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b}} for b in jpegs_b64]
+    parts.append({"type": "text", "text": text})
+    return {"role": "user", "content": parts}
+
+
+def assistant_texts(provider: str, messages: list) -> list[str]:
+    """Texts the assistant wrote in the given slice of messages."""
+    texts = []
+    for m in messages:
+        if m["role"] != "assistant":
+            continue
+        if provider == "openrouter":
+            if (m.get("content") or "").strip():
+                texts.append(m["content"])
+        else:
+            texts += [c["text"] for c in m["content"] if c.get("type") == "text" and c.get("text", "").strip()]
+    return texts
 
 
 def last_assistant_text(messages: list) -> str:

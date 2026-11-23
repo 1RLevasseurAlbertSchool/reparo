@@ -23,17 +23,23 @@ Everything is fictional: the brand Arvel, its 3 products, manuals and 6 customer
 
 ## Deploy on Streamlit Community Cloud (about 15 minutes)
 
-1. **API key.** Create an account on https://platform.claude.com, add a few euros of credit, create an API key.
+1. **API key.** Either an OpenRouter key (https://openrouter.ai, with a few dollars of credit) or an Anthropic key (https://platform.claude.com).
    A demo conversation costs about $0.04 with Claude Sonnet 5.5.
 2. **GitHub.** Create a new repository (public or private) and upload the whole `reparo` folder
    (`app.py` must be at the root of the repository).
 3. **Streamlit.** Go to https://share.streamlit.io, sign in with GitHub, click "Create app", pick the
    repository, branch `main`, main file `app.py`.
-4. **Secret.** In "Advanced settings" → "Secrets", paste:
+4. **Secret.** In "Advanced settings" → "Secrets", paste ONE of these lines:
+   ```
+   OPENROUTER_API_KEY = "sk-or-..."
+   ```
+   (OpenRouter key: the app calls Claude through OpenRouter) or
    ```
    ANTHROPIC_API_KEY = "sk-ant-..."
    ```
-   Optional: `REPARO_MODEL = "claude-haiku-5-5"` to use the cheapest model by default.
+   (Anthropic key: the app calls Claude directly). If both are set, OpenRouter is used.
+   Optional: `REPARO_MODEL = "anthropic/claude-haiku-5.5"` (OpenRouter) or `"claude-haiku-5-5"` (Anthropic)
+   to use the cheapest model by default.
 5. Deploy. You get a public URL like `https://reparo-xxxx.streamlit.app`: this is the link to e-mail.
 6. Set a spending limit on the API key (platform console) and never show the key on screen.
 
