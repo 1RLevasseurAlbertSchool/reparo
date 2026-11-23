@@ -1,0 +1,15 @@
+{
+  "_note": "Fictional brand and fictional customers, created for the Reparo proof of concept. No real personal data.",
+  "brand": "Arvel",
+  "legal_warranty_years": 2,
+  "technician_visit_cost_eur": 90,
+  "out_of_warranty_diagnostic_fee_eur": 89,
+  "appliances": [
+    {"serial": "WM7-2503-1832", "model": "WM-7", "type": "Washing machine (front loader, 8 kg)", "owner": "Camille Martin", "city": "Lyon", "purchase_date": "2025-03-14"},
+    {"serial": "WM7-2306-0419", "model": "WM-7", "type": "Washing machine (front loader, 8 kg)", "owner": "Hugo Bernard", "city": "Nantes", "purchase_date": "2023-06-02"},
+    {"serial": "DW5-2509-2211", "model": "DW-5", "type": "Dishwasher (60 cm, freestanding)", "owner": "Sarah Lefebvre", "city": "Paris", "purchase_date": "2025-09-20"},
+    {"serial": "DW5-2201-0150", "model": "DW-5", "type": "Dishwasher (60 cm, freestanding)", "owner": "Karim Moreau", "city": "Lille", "purchase_date": "2022-01-10"},
+    {"serial": "RF3-2412-0977", "model": "RF-3", "type": "Fridge-freezer (No Frost, 330 L)", "owner": "Julie Petit", "city": "Bordeaux", "purchase_date": "2024-12-05"},
+    {"serial": "RF3-2602-1405", "model": "RF-3", "type": "Fridge-freezer (No Frost, 330 L)", "owner": "Thomas Roux", "city": "Marseille", "purchase_date": "2026-02-18"}
+  ]
+}
